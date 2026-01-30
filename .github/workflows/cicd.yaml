@@ -23,32 +23,39 @@ jobs:
     - name: Print version
       run: echo "VERSION=${{ steps.version.outputs.version }}"
 
+    - name: Set Lowercase Owner
+      # This step fixes the "Zee-Kay03" capital letter issue
+      run: |
+        echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> ${GITHUB_ENV}
+
     - name: Build Docker Image
       run: |
         VERSION=${{ steps.version.outputs.version }}
-        # Note the lowercase 'app/Dockerfile' here matches our file
+        # We use $REPO_OWNER (lowercase) instead of github.repository_owner
         docker build --no-cache \
-          -t ghcr.io/${{ github.repository_owner }}/devsecops-app:$VERSION \
-          -t ghcr.io/${{ github.repository_owner }}/devsecops-app:latest \
+          -t ghcr.io/${{ env.REPO_OWNER }}/devsecops-app:$VERSION \
+          -t ghcr.io/${{ env.REPO_OWNER }}/devsecops-app:latest \
           -f app/Dockerfile app/
 
     - name: Scan Image with Trivy
       uses: aquasecurity/trivy-action@0.20.0
       with:
-        image-ref: ghcr.io/${{ github.repository_owner }}/devsecops-app:latest
+        # We use env.REPO_OWNER here too
+        image-ref: ghcr.io/${{ env.REPO_OWNER }}/devsecops-app:latest
         severity: CRITICAL,HIGH
         ignore-unfixed: true
         exit-code: "0"
-        timeout: "20m"  # Timeout increased for slower connections
+        timeout: "20m"
 
     - name: Login to GHCR
+      # Login still works with the standard actor
       run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
     - name: Push Images
       run: |
         VERSION=${{ steps.version.outputs.version }}
-        docker push ghcr.io/${{ github.repository_owner }}/devsecops-app:$VERSION
-        docker push ghcr.io/${{ github.repository_owner }}/devsecops-app:latest
+        docker push ghcr.io/${{ env.REPO_OWNER }}/devsecops-app:$VERSION
+        docker push ghcr.io/${{ env.REPO_OWNER }}/devsecops-app:latest
 
     - name: Create GHCR Secret in K8s
       run: |
@@ -65,7 +72,8 @@ jobs:
     - name: Patch Deployment With Version
       run: |
         VERSION=${{ steps.version.outputs.version }}
-        kubectl set image deployment/devsecops-app web=ghcr.io/${{ github.repository_owner }}/devsecops-app:$VERSION
+        # Update the deployment to use the lowercase image URL
+        kubectl set image deployment/devsecops-app web=ghcr.io/${{ env.REPO_OWNER }}/devsecops-app:$VERSION
 
     - name: Wait for Rollout
       run: kubectl rollout status deployment/devsecops-app
